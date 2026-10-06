@@ -23,7 +23,7 @@ import pino from 'pino'
 import path, { join, dirname } from 'path'
 import { Boom } from '@hapi/boom'
 import { makeWASocket, protoType, serialize } from '../lib/simple.js'
-import SQLiteDB from '../lib/database.js'
+import Database from '../lib/database.js'
 const { proto } = (await import('@whiskeysockets/baileys')).default
 import pkg from 'google-libphonenumber'
 const { PhoneNumberUtil } = pkg
@@ -142,7 +142,7 @@ global.opts = new Object(
 
 global.prefix = new RegExp('^[#/!.]')
 
-global.db = new SQLiteDB('./src/database/database.db')
+global.db = new Database('./src/database/database.json')
 global.DATABASE = global.db
 
 global.loadDatabase = async function loadDatabase() {

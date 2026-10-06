@@ -837,28 +837,23 @@ export async function handler(
     m.exp = 0
     m.monedas = false
 
-    const senderKey =
-      m.sender ||
-      m.key?.participant ||
-      m.key?.participantAlt ||
-      ''
-
     global.db.data.users ||= {}
     global.db.data.chats ||= {}
     global.db.data.settings ||= {}
     global.db.data.stats ||= {}
 
-    let user =
-      global.db.data.users[
-        senderKey
-      ]
-
     const alternateSender =
       m.key?.participantAlt ||
+      m.key?.senderPn ||
       m.senderPn ||
-      m.senderPnAlt ||
       m.phoneNumber ||
       ''
+
+    const rawLid =
+      [
+        m.sender,
+        m.key?.participant
+      ].find(isLid) || ''
 
     const senderResolvedInitial =
       await safeRun(
@@ -872,28 +867,61 @@ export async function handler(
         3000
       ) || m.sender
 
-    if (
-      senderResolvedInitial &&
-      senderResolvedInitial !==
+    const senderKey =
+      (isRealJid(senderResolvedInitial)
+        ? senderResolvedInitial
+        : '') ||
+      (isRealJid(alternateSender)
+        ? alternateSender
+        : '') ||
+      senderResolvedInitial ||
+      m.sender ||
+      ''
+
+    let user =
+      global.db.data.users[
         senderKey
+      ]
+
+    for (
+      const oldKey of new Set([
+        m.sender,
+        m.key?.participant,
+        m.key?.participantAlt,
+        rawLid
+      ])
     ) {
-      const resolvedUser =
+      if (
+        !oldKey ||
+        oldKey === senderKey
+      ) continue
+
+      const oldUser =
         global.db.data.users[
-          senderResolvedInitial
+          oldKey
         ]
 
       if (
-        resolvedUser &&
-        typeof resolvedUser === 'object'
+        oldUser &&
+        typeof oldUser === 'object'
       ) {
-        user = resolvedUser
-      } else if (
-        user &&
-        typeof user === 'object'
-      ) {
+        user =
+          user &&
+          typeof user === 'object'
+            ? Object.assign(
+                {},
+                oldUser,
+                user
+              )
+            : oldUser
+
         global.db.data.users[
-          senderResolvedInitial
+          senderKey
         ] = user
+
+        delete global.db.data.users[
+          oldKey
+        ]
       }
     }
 
@@ -904,6 +932,22 @@ export async function handler(
       global.db.data.users[
         senderKey
       ] = user = {}
+    }
+
+    const pushName =
+      m.pushName ||
+      m.name ||
+      ''
+
+    const number =
+      normalizeNumber(senderKey)
+
+    if (
+      pushName &&
+      (!user.name ||
+        user.name === 'Usuario')
+    ) {
+      user.name = pushName
     }
 
     Object.assign(user, {
@@ -1006,8 +1050,14 @@ export async function handler(
         user.packstickers || null,
       name:
         user.name ||
-        m.name ||
-        'Usuario',
+        pushName ||
+        `+${number}`,
+      number,
+      jid: senderKey,
+      lid:
+        rawLid ||
+        user.lid ||
+        '',
       age: isNumber(user.age)
         ? user.age
         : -1,
@@ -2228,6 +2278,42 @@ export async function handler(
         continue
       }
 
+      const getUserDisplay = async jidOrLid => {
+        const key =
+          (await safeRun(
+            () =>
+              resolveJid(
+                jidOrLid,
+                this,
+                m.chat
+              ),
+            3000
+          )) ||
+          jidOrLid ||
+          ''
+
+        const number =
+          normalizeNumber(key)
+
+        const stored =
+          global.db.data.users?.[key]
+
+        const name =
+          (stored?.name &&
+            stored.name !== 'Usuario'
+            ? stored.name
+            : '') ||
+          this.getName?.(key) ||
+          `+${number}`
+
+        return {
+          jid: key,
+          number,
+          name,
+          mention: `@${number}`
+        }
+      }
+
       const extra = {
         match,
         usedPrefix,
@@ -2241,6 +2327,7 @@ export async function handler(
         groupMetadata,
         user:
           participant,
+        getUserDisplay,
         bot:
           botParticipant,
         isROwner,
@@ -2503,6 +2590,12 @@ export async function handler(
           )
         }
       }
+
+      await safeRun(
+        () => global.db?.write?.(),
+        5000
+      )
+      global.db?.save?.()
     } catch (error) {
       console.error(
         '[HANDLER FINALLY ERROR]',
